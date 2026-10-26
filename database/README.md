@@ -1,32 +1,33 @@
-# Camera Studio database
+# Camera Studio database and administrator access
 
 Target: https://ldfbrwcdebwoypthdqko.supabase.co
 
-Run camera-studio.sql once in the Supabase SQL Editor. This creates only
-public.camera_studio_state, with row level security enabled and no anonymous or
-signed-in browser access. It does not modify TV OS tables or share their records.
-This is a separate application table in the same Supabase project, not a separate
-Supabase project or independently credentialed database.
+Apply camera-studio.sql, then camera-studio-auth.sql. The first creates an isolated
+Camera Studio state table. The second restricts it to users explicitly listed in
+camera_studio_admins. TV OS tables and platform_admins memberships are unchanged.
+Do not grant Camera membership to ordinary TV users. Add administrator memberships
+through trusted Supabase database administration only, never from the browser app.
 
-The existing admin record structure is persisted as a versioned JSON document.
-Writes compare the revision and retry on conflicts to avoid losing concurrent
-updates across server instances. Customers, plans, licenses, payments, models,
-tickets, studio snapshots and audit entries remain together in that document.
-No customer data is seeded. Plan/model defaults are saved on the first write.
-Database errors never fall back to local files. Hosted deployments require the DB.
-Local installations without database variables retain the original local storage.
-Existing local records are not automatically imported.
+Camera Studio uses the publishable key and the signed-in administrator's access
+token, not a service role key. RLS checks Camera membership for reads and writes.
+Removing membership or disabling it revokes Camera access on subsequent requests.
+Email/password authentication uses Supabase Auth; passwords are not stored here.
+Auth verifies the token and membership on every privileged server request.
 
-Configure server-only environment variables from .env.example. Never use a
-NEXT_PUBLIC_ prefix for the service role key, admin key hash or session secret.
-Use the project service role key only on the trusted server. The key can access
-other tables in the same project, so independent credentials require a separate
-Supabase project or a dedicated scoped database role.
+The existing record structure is stored as a versioned JSON document. Writes
+compare revision and retry conflicts across server instances. Database failures
+never fall back to local files. Existing local records are not automatically
+imported. Draft plans/models initialize on the first write; no customers are seeded.
 
-Hosted admin additionally requires CAMERA_ADMIN_ORIGIN, CAMERA_ADMIN_KEY_HASH and
-CAMERA_ADMIN_SESSION_SECRET. There is no default login password. Local setup
-creates data/admin-access.txt; the repository intentionally excludes that file.
-The stored hash cannot be reversed to recover the private access key.
+Set CAMERA_SUPABASE_URL, CAMERA_SUPABASE_PUBLISHABLE_KEY, CAMERA_ADMIN_ORIGIN
+(exact HTTPS origin, no trailing slash), and CAMERA_ADMIN_SESSION_SECRET (random,
+32+ characters) in the Camera Studio Vercel project's production environment.
+There is no default password. Use the password set for the approved Supabase user.
+Sessions require sign-in again after one hour or token expiry, whichever is sooner.
+Access tokens remain inside the encrypted HttpOnly secure session cookie.
 
-After configuration, verify login, create a real record, reload and confirm it
-persists. Check that anonymous REST reads return no rows or permission denied.
+Local installs without Supabase variables retain the original access-key login
+and local storage. data/admin-access.txt is only for that local mode.
+
+Verify login, create a real record, reload and confirm persistence. Also test a
+signed-in non-Camera user: membership and records must be inaccessible.

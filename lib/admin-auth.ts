@@ -1,3 +1,4 @@
+import { cameraAuthConfigured, cameraUserIsAdmin } from "./camera-auth";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
 import { promises as fs } from "node:fs";
@@ -8,17 +9,17 @@ type Config = { keyHash: string; sessionSecret: string };
 export async function adminConfig(): Promise<Config> {
   const keyHash = process.env.CAMERA_ADMIN_KEY_HASH;
   const sessionSecret = process.env.CAMERA_ADMIN_SESSION_SECRET;
-  if (keyHash || sessionSecret) {
-    if (!keyHash || !/^[a-f0-9]{64}$/.test(keyHash) || !sessionSecret || sessionSecret.length < 32)
+  if (keyHash || sessionSecret || cameraAuthConfigured()) {
+    if ((!cameraAuthConfigured() && (!keyHash || !/^[a-f0-9]{64}$/.test(keyHash))) || !sessionSecret || sessionSecret.length < 32)
       throw new Error("Camera admin configuration is incomplete.");
-    return { keyHash, sessionSecret };
+    return { keyHash: keyHash ?? "supabase-auth", sessionSecret };
   }
   if (process.env.VERCEL) throw new Error("Configure Camera admin secrets for this deployment.");
   return JSON.parse(await fs.readFile(AUTH_FILE, "utf8"));
 }
 export async function adminSession() {
   const config = await adminConfig();
-  return getIronSession<{ role?: string; version?: string }>(await cookies(), {
+  return getIronSession<{ role?: string; version?: string; userId?:string; accessToken?:string; expiresAt?:number }>(await cookies(), {
     password: config.sessionSecret,
     cookieName: "savrdh_admin",
     ttl: 8 * 3600,
@@ -33,6 +34,10 @@ export async function adminSession() {
 export async function isAdmin() {
   try {
     const session = await adminSession();
+    if(cameraAuthConfigured()) {
+      if(!session.accessToken || !session.userId || !session.expiresAt || session.expiresAt<=Date.now()) return false;
+      return Boolean(await cameraUserIsAdmin(session.accessToken,session.userId));
+    }
     const config = await adminConfig();
     return session.role === "superadmin" && session.version === config.keyHash;
   } catch {
@@ -40,7 +45,7 @@ export async function isAdmin() {
   }
 }
 export async function verifyKey(key: unknown) {
-  if (typeof key !== "string" || key.length > 256) return false;
+  if (cameraAuthConfigured() || typeof key !== "string" || key.length > 256) return false;
   const config = await adminConfig();
   const digest = createHash("sha256").update(key).digest();
   return timingSafeEqual(digest, Buffer.from(config.keyHash, "hex"));

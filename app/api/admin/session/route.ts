@@ -1,3 +1,4 @@
+import { cameraAuthConfigured, signInCameraAdmin } from "@/lib/camera-auth";
 import {
   adminConfig,
   adminSession,
@@ -12,7 +13,7 @@ const shared = globalThis as typeof globalThis & {
 };
 export async function GET() {
   return Response.json(
-    { authenticated: await isAdmin() },
+    { authenticated: await isAdmin(), authMode:cameraAuthConfigured() ? "email" : "key" },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
@@ -32,17 +33,23 @@ export async function POST(req: Request) {
     );
   shared.adminAttempts.count++;
   try {
-    if (Number(req.headers.get("content-length") ?? 0) > 1024)
+    if (Number(req.headers.get("content-length") ?? 0) > 2048)
       return Response.json({ error: "Invalid request." }, { status: 400 });
-    const { key } = await req.json();
-    if (!(await verifyKey(key)))
-      return Response.json(
-        { error: "The admin access key is incorrect." },
-        { status: 401 },
-      );
+    const body = await req.json();
     const session = await adminSession();
-    session.role = "superadmin";
-    session.version = (await adminConfig()).keyHash;
+    if(cameraAuthConfigured()) {
+      const credentials=await signInCameraAdmin(body.email,body.password);
+      if(!credentials) return Response.json({error:"Incorrect credentials or no Camera Studio administrator access."},{status:401});
+      session.userId=credentials.userId;
+      session.accessToken=credentials.accessToken;
+      session.expiresAt=credentials.expiresAt;
+      session.role="superadmin";
+      session.version=undefined;
+    } else {
+      if(!(await verifyKey(body.key))) return Response.json({error:"The admin access key is incorrect."},{status:401});
+      session.role="superadmin";
+      session.version=(await adminConfig()).keyHash;
+    }
     await session.save();
     shared.adminAttempts.count = 0;
     return Response.json(
