@@ -54,6 +54,7 @@ export const SECTIONS = [
   { id: "", label: "Dashboard", icon: "home" },
   { id: "studio", label: "SAVRDH Camera Studio", icon: "camera" },
   { id: "customers", label: "Customers", icon: "user" },
+  { id: "trials", label: "Trial Requests", icon: "check" },
   { id: "plans", label: "Subscription Plans", icon: "library" },
   { id: "licenses", label: "Licenses & Activation", icon: "check" },
   { id: "models", label: "Camera Models", icon: "camera" },

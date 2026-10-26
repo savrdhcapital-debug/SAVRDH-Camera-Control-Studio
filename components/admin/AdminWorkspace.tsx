@@ -212,7 +212,7 @@ export default function AdminWorkspace({ section }: { section: string }) {
     : [];
   const metricCards = [
     ["Total customers", customers.length, "Saved customer records", "user"],
-    ["Active licenses", licenses.length, "Local license registry", "check"],
+    ["Active licenses", licenses.length, "Camera Studio license registry", "check"],
     ["Monthly plan value", money(monthly), "Based on active licenses", "pulse"],
     [
       "Recorded revenue",
@@ -429,7 +429,7 @@ export default function AdminWorkspace({ section }: { section: string }) {
                     ? "Manual payment records. This ledger does not charge customers."
                     : section === "licenses"
                       ? "Issue and track local license records. Client-side feature enforcement is not enabled."
-                      : "Manage your local workspace records."}
+                      : "Manage your Camera Studio records."}
           </p>
         </div>
         <div className="flex gap-2">
@@ -600,7 +600,7 @@ export default function AdminWorkspace({ section }: { section: string }) {
                   </p>
                   <p className="text-sm text-muted mb-5">
                     {p.deviceLimit} device{p.deviceLimit === 1 ? "" : "s"} ·
-                    Local plan definition
+                    Plan definition
                   </p>
                   <p className="text-xs text-muted mb-5">
                     {p.notes || "Add plan features and notes when editing."}

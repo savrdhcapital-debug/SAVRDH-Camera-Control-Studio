@@ -49,7 +49,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
             <span className="admin-avatar">S</span>
             <div>
               <b>Studio owner</b>
-              <p>Local administrator</p>
+              <p>Camera Studio administrator</p>
             </div>
           </div>
         </aside>
@@ -64,7 +64,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <span className="studio-badge">Local workspace</span>
+              <span className="studio-badge">Camera Studio workspace</span>
               <button
                 className="admin-signout"
                 onClick={async () => {

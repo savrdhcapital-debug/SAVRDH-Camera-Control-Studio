@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
+import AccessGuard from "@/components/AccessGuard";
 import Providers from "@/components/Providers";
 
 export const metadata: Metadata = {
@@ -12,7 +13,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" data-theme="dark">
       <body>
-        <Providers>{children}</Providers>
+        <Providers><AccessGuard />{children}</Providers>
       </body>
     </html>
   );
