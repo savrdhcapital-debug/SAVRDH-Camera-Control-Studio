@@ -1,3 +1,4 @@
+import { databaseConfigured, readCameraDatabase, writeCameraDatabase } from "./camera-database";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID, randomBytes } from "node:crypto";
@@ -75,6 +76,8 @@ function initial(): AdminData {
   };
 }
 export async function readAdmin(): Promise<AdminData> {
+  if (databaseConfigured()) return (await readCameraDatabase())?.payload ?? initial();
+  if (process.env.VERCEL) throw new Error("Configure the Camera Studio database before using hosted admin records.");
   try {
     return JSON.parse(await fs.readFile(FILE, "utf8"));
   } catch (e) {
@@ -90,6 +93,15 @@ export function transaction<T>(
   const op = (shared.adminWriteQueue ?? Promise.resolve())
     .catch(() => {})
     .then(async () => {
+      if (databaseConfigured()) {
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const stored = await readCameraDatabase();
+          const data = stored?.payload ?? initial();
+          const result = await fn(data);
+          if (await writeCameraDatabase(data, stored?.revision ?? null)) return result;
+        }
+        throw new Error("Records changed in another session. Please try again.");
+      }
       const data = await readAdmin();
       const result = await fn(data);
       await fs.mkdir(path.dirname(FILE), { recursive: true });

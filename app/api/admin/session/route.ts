@@ -2,7 +2,7 @@ import {
   adminConfig,
   adminSession,
   isAdmin,
-  localRequest,
+  adminRequest,
   verifyKey,
 } from "@/lib/admin-auth";
 export const runtime = "nodejs";
@@ -17,9 +17,9 @@ export async function GET() {
   );
 }
 export async function POST(req: Request) {
-  if (!localRequest(req, true))
+  if (!adminRequest(req, true))
     return Response.json(
-      { error: "Admin sign-in is available on localhost only." },
+      { error: "Admin sign-in is not allowed from this origin." },
       { status: 403 },
     );
   const now = Date.now();
@@ -53,14 +53,14 @@ export async function POST(req: Request) {
     return Response.json(
       {
         error:
-          "Admin access is not configured. Run npm run admin:setup on the local server.",
+          "Admin access is not configured. Configure the administrator secrets on the server.",
       },
       { status: 503 },
     );
   }
 }
 export async function DELETE(req: Request) {
-  if (!localRequest(req))
+  if (!adminRequest(req))
     return Response.json({ error: "Request rejected." }, { status: 403 });
   try {
     (await adminSession()).destroy();

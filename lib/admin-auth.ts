@@ -6,6 +6,14 @@ import { createHash, timingSafeEqual } from "node:crypto";
 export const AUTH_FILE = path.join(process.cwd(), "data", "admin-auth.json");
 type Config = { keyHash: string; sessionSecret: string };
 export async function adminConfig(): Promise<Config> {
+  const keyHash = process.env.CAMERA_ADMIN_KEY_HASH;
+  const sessionSecret = process.env.CAMERA_ADMIN_SESSION_SECRET;
+  if (keyHash || sessionSecret) {
+    if (!keyHash || !/^[a-f0-9]{64}$/.test(keyHash) || !sessionSecret || sessionSecret.length < 32)
+      throw new Error("Camera admin configuration is incomplete.");
+    return { keyHash, sessionSecret };
+  }
+  if (process.env.VERCEL) throw new Error("Configure Camera admin secrets for this deployment.");
   return JSON.parse(await fs.readFile(AUTH_FILE, "utf8"));
 }
 export async function adminSession() {
@@ -17,7 +25,7 @@ export async function adminSession() {
     cookieOptions: {
       httpOnly: true,
       sameSite: "strict",
-      secure: process.env.ADMIN_SECURE_COOKIE === "true",
+      secure: process.env.NODE_ENV === "production" || process.env.ADMIN_SECURE_COOKIE === "true",
       path: "/",
     },
   });
@@ -50,4 +58,19 @@ export function localRequest(req: Request, mutation = false) {
     (!mutation ||
       req.headers.get("content-type")?.startsWith("application/json"))
   );
+}
+
+export function adminRequest(req: Request, mutation = false) {
+  if (localRequest(req, mutation)) return true;
+  const configured = process.env.CAMERA_ADMIN_ORIGIN;
+  if (!configured) return false;
+  try {
+    const allowed = new URL(configured);
+    const url = new URL(req.url);
+    return allowed.protocol === "https:" && allowed.origin === configured &&
+      url.origin === allowed.origin &&
+      req.headers.get("sec-fetch-site") !== "cross-site" &&
+      (!mutation || req.headers.get("origin") === allowed.origin) &&
+      (!mutation || Boolean(req.headers.get("content-type")?.startsWith("application/json")));
+  } catch { return false; }
 }

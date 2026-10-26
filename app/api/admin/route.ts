@@ -1,4 +1,4 @@
-import { isAdmin, localRequest } from "@/lib/admin-auth";
+import { isAdmin, adminRequest } from "@/lib/admin-auth";
 import { readAdmin, saveRecord } from "@/lib/admin-store";
 import { ENTITIES, type Entity } from "@/lib/admin-types";
 export const runtime = "nodejs";
@@ -6,16 +6,16 @@ export const dynamic = "force-dynamic";
 const json = (data: unknown, status = 200) =>
   Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
 export async function GET(req: Request) {
-  if (!localRequest(req) || !(await isAdmin()))
+  if (!adminRequest(req) || !(await isAdmin()))
     return json({ error: "Admin sign-in required." }, 401);
   try {
     return json(await readAdmin());
   } catch {
-    return json({ error: "Could not read the local admin store." }, 500);
+    return json({ error: "Could not read admin records. Check the database connection." }, 500);
   }
 }
 export async function POST(req: Request) {
-  if (!localRequest(req, true) || !(await isAdmin()))
+  if (!adminRequest(req, true) || !(await isAdmin()))
     return json({ error: "Admin sign-in required." }, 401);
   try {
     const text = await req.text();
