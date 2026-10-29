@@ -317,6 +317,11 @@ struct CameraCredentials: Codable {
     #if os(macOS)
     private func cctvRequest(_ parsed: URLComponents, method: String, input: [String: Any]) async throws -> [String: Any] {
         let parts = parsed.path.split(separator: "/").map(String.init)
+        if parsed.path == "/api/cctv/test" && method == "POST" {
+            let raw = (input["body"] as? String ?? "{}").data(using: .utf8)!
+            guard raw.count <= 8192, let body = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else { throw CameraFailure(message: "Invalid CCTV settings.") }
+            return try Self.jsonReply(await CCTVManager.shared.test(body))
+        }
         if parsed.path == "/api/cctv/discover" && method == "POST" {
             let devices = await Task.detached { ONVIF.discover() }.value
             return try Self.jsonReply(["cameras": devices])
@@ -347,7 +352,7 @@ struct CameraCredentials: Codable {
     private static let bridge = #"""
     (() => {
       if (location.origin !== 'https://camera-control-studio.vercel.app') return;
-      Object.defineProperty(window, 'savrdhNative', {value: {platform: 'apple', localCamera: true}, writable: false});
+      Object.defineProperty(window, 'savrdhNative', {value: {platform: 'apple', localCamera: true, verifiedCCTV: true}, writable: false});
       const originalFetch = window.fetch.bind(window);
       window.fetch = async (input, options = {}) => {
         const request = new Request(input, options);
@@ -402,6 +407,7 @@ struct CameraAccessView: View {
     }
 }
 
+#if !ONVIF_INTEGRATION_TEST
 @main struct CameraStudioApp: App {
     @StateObject private var controller = StudioController()
     init() {
@@ -425,8 +431,14 @@ struct CameraAccessView: View {
             precondition(xml.tokens == ["Profile1"])
             precondition(xml.first("MediaUri/Uri") == "rtsp://192.168.1.3/live")
             precondition((try? ONVIFXML.parse(Data("<!DOCTYPE test [<!ENTITY x 'entity'>]><test>&x;</test>".utf8))) == nil)
+            let clock = try! ONVIFXML.parse(Data("<SystemDateAndTime><UTCDateTime><Time><Hour>8</Hour><Minute>7</Minute><Second>20</Second></Time><Date><Year>2026</Year><Month>10</Month><Day>29</Day></Date></UTCDateTime></SystemDateAndTime>".utf8))
+            precondition(ISO8601DateFormatter().string(from: ONVIF.cameraDate(clock)!) == "2026-10-29T08:07:20Z")
+            let fault = Data("<s:Envelope xmlns:s='http://www.w3.org/2003/05/soap-envelope'><s:Body><s:Fault><s:Reason><s:Text>Not Authorized</s:Text></s:Reason></s:Fault></s:Body></s:Envelope>".utf8)
+            precondition((try? ONVIFXML.parse(fault)) == nil)
+            let secured = ONVIF.envelope("<tds:GetCapabilities/>", login: CCTVLogin(username: "fixture<&", password: "test-only"), date: ONVIF.cameraDate(clock)!)
+            precondition(secured.contains("2026-10-29T08:07:20Z") && secured.contains("fixture&lt;&amp;") && !secured.contains("test-only"))
             #endif
-            print("Native camera checks passed: 25 address/XML cases. No hardware requests were sent.")
+            print("Native camera checks passed: address validation, XML safety, SOAP faults and camera-clock authentication. No hardware requests were sent.")
             exit(0)
         }
     }
@@ -451,3 +463,4 @@ struct CameraAccessView: View {
         }
     }
 }
+#endif

@@ -74,8 +74,8 @@ export default function Shell({ children }: { children: ReactNode }) {
                 <Icon name="wifi" className="h-6 w-6" />
               </span>
               <div className="leading-tight">
-                <div className="font-semibold tracking-tight">{cam.conn?.name ?? "Canon EOS R50"}</div>
-                <div className={`text-xs ${statusColor}`}>● {statusText}</div>
+                <div className="font-semibold tracking-tight">{path === "/cctv" ? "Local CCTV Studio" : cam.conn?.name ?? "Canon EOS R50"}</div>
+                <div className={`text-xs ${path === "/cctv" ? "text-muted" : statusColor}`}>{path === "/cctv" ? "Video status appears on each camera preview" : `● ${statusText}`}</div>
               </div>
             </div>
             <div className="flex items-center gap-3">

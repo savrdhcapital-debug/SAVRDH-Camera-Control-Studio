@@ -58,7 +58,11 @@ final class CCTVHTTP: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         var request = URLRequest(url: url)
         if let soap { request.httpMethod = "POST"; request.httpBody = soap.data(using: .utf8); request.setValue("application/soap+xml; charset=utf-8", forHTTPHeaderField: "Content-Type") }
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw CameraFailure(message: "Camera rejected the request. Check its local username, password, and ONVIF setting.") }
+        guard let http = response as? HTTPURLResponse else { throw CameraFailure(message: "The camera returned an invalid network response.") }
+        if [401, 403].contains(http.statusCode) {
+            throw CameraFailure(message: "Camera reached, but ONVIF login was rejected (HTTP \(http.statusCode)). Use the camera’s local ONVIF account. Its device ID and phone-app account may be different. Check the local account in the phone app; no video access has been granted.")
+        }
+        guard http.statusCode == 200 else { throw CameraFailure(message: "Camera service returned HTTP \(http.statusCode). Check the discovered service address and ONVIF settings.") }
         guard data.count <= 8 * 1024 * 1024 else { throw CameraFailure(message: "The camera response was too large.") }
         return data
     }
@@ -87,6 +91,13 @@ final class ONVIFXML: NSObject, XMLParserDelegate {
         let result = ONVIFXML(); let parser = XMLParser(data: data)
         parser.shouldResolveExternalEntities = false; parser.delegate = result
         guard parser.parse() else { throw CameraFailure(message: "This address did not return an ONVIF response.") }
+        if result.values.contains(where: { $0.0.contains("/Fault/") }) {
+            let reason = result.first("Reason/Text") ?? "Camera rejected the ONVIF operation."
+            if reason.lowercased().contains("authoriz") {
+                throw CameraFailure(message: "Camera reached, but ONVIF authentication was rejected. Check the camera’s local account, ONVIF permissions and date/time.")
+            }
+            throw CameraFailure(message: "ONVIF request failed: \(String(reason.prefix(180)))")
+        }
         return result
     }
     func first(_ ending: String) -> String? { values.first { $0.0.hasSuffix(ending) }?.1 }
@@ -94,25 +105,40 @@ final class ONVIFXML: NSObject, XMLParserDelegate {
 
 struct ONVIF {
     static func escaped(_ text: String) -> String { text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;").replacingOccurrences(of: "'", with: "&apos;") }
-    static func envelope(_ body: String, login: CCTVLogin) -> String {
+    static func envelope(_ body: String, login: CCTVLogin, date: Date = Date()) -> String {
         var header = ""
         if !login.username.isEmpty {
             let nonce = Data((0..<20).map { _ in UInt8.random(in: 0...255) })
-            let created = ISO8601DateFormatter().string(from: Date())
+            let created = ISO8601DateFormatter().string(from: date)
             let digest = Data(Insecure.SHA1.hash(data: nonce + Data(created.utf8) + Data(login.password.utf8))).base64EncodedString()
             header = "<s:Header><wsse:Security s:mustUnderstand=\"1\"><wsse:UsernameToken><wsse:Username>\(escaped(login.username))</wsse:Username><wsse:Password Type=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest\">\(digest)</wsse:Password><wsse:Nonce EncodingType=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary\">\(nonce.base64EncodedString())</wsse:Nonce><wsu:Created>\(created)</wsu:Created></wsse:UsernameToken></wsse:Security></s:Header>"
         }
         return "<?xml version=\"1.0\"?><s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\" xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\" xmlns:tt=\"http://www.onvif.org/ver10/schema\" xmlns:wsse=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd\" xmlns:wsu=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd\">\(header)<s:Body>\(body)</s:Body></s:Envelope>"
     }
+    static func cameraDate(_ xml: ONVIFXML) -> Date? {
+        let fields = ["Year", "Month", "Day"].map { xml.first("UTCDateTime/Date/" + $0).flatMap(Int.init) }
+        let time = ["Hour", "Minute", "Second"].map { xml.first("UTCDateTime/Time/" + $0).flatMap(Int.init) }
+        guard fields.allSatisfy({ $0 != nil }), time.allSatisfy({ $0 != nil }),
+              (2000...2100).contains(fields[0]!), (1...12).contains(fields[1]!), (1...31).contains(fields[2]!),
+              (0...23).contains(time[0]!), (0...59).contains(time[1]!), (0...59).contains(time[2]!) else { return nil }
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar.date(from: DateComponents(year: fields[0], month: fields[1], day: fields[2], hour: time[0], minute: time[1], second: time[2]))
+    }
     static func stream(service: URL, login: CCTVLogin) async throws -> URL {
         guard validCCTVURL(service, schemes: ["http", "https"]), let host = service.host else { throw CameraFailure(message: "Enter a private ONVIF service address.") }
         let client = CCTVHTTP(host: host, login: login)
-        let capabilities = try ONVIFXML.parse(await client.request(service, soap: envelope("<tds:GetCapabilities><tds:Category>Media</tds:Category></tds:GetCapabilities>", login: login)))
+        // WS-Security tokens must match the camera clock. Read it without changing
+        // camera settings; do not mistake clock skew for a wrong password.
+        var offset: TimeInterval = 0
+        let clockClient = CCTVHTTP(host: host, login: CCTVLogin(username: "", password: ""))
+        if let clockData = try? await clockClient.request(service, soap: envelope("<tds:GetSystemDateAndTime/>", login: CCTVLogin(username: "", password: ""))),
+           let clockXML = try? ONVIFXML.parse(clockData), let date = cameraDate(clockXML) { offset = date.timeIntervalSinceNow }
+        let capabilities = try ONVIFXML.parse(await client.request(service, soap: envelope("<tds:GetCapabilities><tds:Category>Media</tds:Category></tds:GetCapabilities>", login: login, date: Date().addingTimeInterval(offset))))
         guard let address = capabilities.first("Media/XAddr"), let media = URL(string: address), media.host == host, validCCTVURL(media, schemes: ["http", "https"]) else { throw CameraFailure(message: "ONVIF Media service is unavailable. Use the camera’s RTSP URL instead.") }
-        let profiles = try ONVIFXML.parse(await client.request(media, soap: envelope("<trt:GetProfiles/>", login: login)))
+        let profiles = try ONVIFXML.parse(await client.request(media, soap: envelope("<trt:GetProfiles/>", login: login, date: Date().addingTimeInterval(offset))))
         guard let token = profiles.tokens.first else { throw CameraFailure(message: "No ONVIF video profiles were returned.") }
         let body = "<trt:GetStreamUri><trt:StreamSetup><tt:Stream>RTP-Unicast</tt:Stream><tt:Transport><tt:Protocol>RTSP</tt:Protocol></tt:Transport></trt:StreamSetup><trt:ProfileToken>\(escaped(token))</trt:ProfileToken></trt:GetStreamUri>"
-        let streams = try ONVIFXML.parse(await client.request(media, soap: envelope(body, login: login)))
+        let streams = try ONVIFXML.parse(await client.request(media, soap: envelope(body, login: login, date: Date().addingTimeInterval(offset))))
         guard let value = streams.first("MediaUri/Uri"), var uri = URLComponents(string: value), uri.host == host else { throw CameraFailure(message: "The camera did not return a usable local RTSP address.") }
         uri.user = nil; uri.password = nil
         guard let result = uri.url, validCCTVURL(result, schemes: ["rtsp"]) else { throw CameraFailure(message: "The camera returned an unsupported stream address.") }
@@ -169,10 +195,21 @@ final class CCTVDecoder: @unchecked Sendable {
             guard !data.isEmpty else { file.readabilityHandler = nil; return }
             self?.consume(data)
         }
-        errors.fileHandleForReading.readabilityHandler = { file in if file.availableData.isEmpty { file.readabilityHandler = nil } } // Never retain camera credentials from decoder logs.
+        errors.fileHandleForReading.readabilityHandler = { [weak self] file in
+            let data = file.availableData
+            if data.isEmpty { file.readabilityHandler = nil; return }
+            // Classify errors, retaining no raw text, URLs or credentials.
+            let text = String(decoding: data, as: UTF8.self).lowercased()
+            let message: String?
+            if text.contains("401") || text.contains("unauthorized") || text.contains("403") { message = "RTSP login rejected. Check the camera’s local video account and streaming permission." }
+            else if text.contains("connection refused") { message = "RTSP port refused the connection. Enable RTSP on the camera and check its stream port." }
+            else if text.contains("timed out") || text.contains("no route to host") { message = "Camera video timed out. Check that the camera is awake and on the same Wi-Fi." }
+            else { message = nil }
+            if let self, let message { self.lock.lock(); self.failure = message; self.lock.unlock() }
+        }
         process.terminationHandler = { [weak self] process in
             guard let self else { return }; self.lock.lock(); defer { self.lock.unlock() }
-            if !self.stopped { self.failure = "Preview stopped. Check camera address, local login, RTSP access and Wi-Fi." }
+            if !self.stopped && self.failure == nil { self.failure = "Preview stopped. Check camera address, local login, RTSP access and Wi-Fi." }
         }
         try process.run()
     }
@@ -214,7 +251,7 @@ actor CCTVManager {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
     }
     func list() -> [[String: Any]] { cameras.map { ["id": $0.id, "name": $0.name, "kind": $0.kind, "url": $0.url] } }
-    func save(_ body: [String: Any]) async throws -> [[String: Any]] {
+    private func resolve(_ body: [String: Any]) async throws -> (String, String, URL, CCTVLogin) {
         let name = String((body["name"] as? String ?? "").prefix(80)).trimmingCharacters(in: .whitespacesAndNewlines)
         let kind = body["kind"] as? String ?? "rtsp"
         guard name.count >= 2, let raw = body["url"] as? String, raw.count <= 2000, let input = URL(string: raw), validCCTVURL(input), ["rtsp", "snapshot", "onvif"].contains(kind) else { throw CameraFailure(message: "Enter a camera name and private RTSP, HTTP snapshot, or ONVIF address. Put credentials in the separate fields.") }
@@ -223,6 +260,32 @@ actor CCTVManager {
         if kind == "onvif" { url = try await ONVIF.stream(service: input, login: login) }
         else { url = input }
         guard kind != "rtsp" || url.scheme == "rtsp", kind != "snapshot" || ["http", "https"].contains(url.scheme ?? "") else { throw CameraFailure(message: "Select the matching connection type.") }
+        return (name, kind, url, login)
+    }
+    private func verifyVideo(kind: String, url: URL, login: CCTVLogin) async throws {
+        if kind == "snapshot" {
+            let data = try await CCTVHTTP(host: url.host!, login: login).request(url)
+            guard data.starts(with: [0xff, 0xd8]) || data.starts(with: [0x89, 0x50, 0x4e, 0x47]) else { throw CameraFailure(message: "Camera responded, but the snapshot was not a JPEG or PNG image.") }
+            return
+        }
+        guard decoders.count < 4 else { throw CameraFailure(message: "Stop one preview before testing another camera.") }
+        let decoder = CCTVDecoder(); try decoder.start(url: url, login: login)
+        defer { decoder.stop() }
+        for _ in 0..<40 {
+            do { _ = try decoder.frame(); return }
+            catch let error as CameraFailure where error.message == "Waiting for the first CCTV frame…" { try await Task.sleep(nanoseconds: 250_000_000) }
+        }
+        throw CameraFailure(message: "No video frame arrived within 10 seconds. Video access is not verified. Check RTSP access and stream settings.")
+    }
+    func test(_ body: [String: Any]) async throws -> [String: Any] {
+        let (_, kind, url, login) = try await resolve(body)
+        try await verifyVideo(kind: kind, url: url, login: login)
+        return ["ok": true, "message": "Camera authentication and a real video frame verified. You can now save this camera."]
+    }
+    func save(_ body: [String: Any]) async throws -> [[String: Any]] {
+        let (name, kind, url, login) = try await resolve(body)
+        // A saved camera must supply a real frame; discovery alone is not success.
+        try await verifyVideo(kind: kind, url: url, login: login)
         guard cameras.count < 32 else { throw CameraFailure(message: "A maximum of 32 saved CCTV cameras is supported.") }
         let id = UUID().uuidString
         try login.save(id)

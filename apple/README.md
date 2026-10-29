@@ -70,6 +70,17 @@ are written under `build/apple/`. The included decoder is pinned to the
 ffmpeg-static b6.1.1 macOS arm64 release. Its upstream README and license are
 bundled in app Resources; see the source and build instructions there.
 
-The native binary has a `--self-test` option that runs 25 private-address and XML
-checks without contacting any camera. The app's website source must also be
+The native binary has a `--self-test` option that checks private addresses, XML
+safety, SOAP faults and camera-clock handling without contacting any camera.
+Run `python3 scripts/test-native-onvif.py` to exercise the real Swift client against
+a local protocol fixture, including rejected logins and unsafe service URLs. The app's website source must also be
 published for the new CCTV and native-connection interface to appear.
+
+## Connection verification (0.2.1)
+
+New CCTV saves verify one real frame before storing the camera; successful saves
+start preview automatically. Test connection & video checks the same flow without
+saving credentials. ONVIF security tokens use the camera UTC clock when available,
+without modifying camera settings. Authentication failures and RTSP transport
+errors are reported separately. Camera login is still required where enforced
+by the device; discovery does not bypass it.
