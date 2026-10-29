@@ -311,7 +311,7 @@ export function CameraProvider({ children }: { children: ReactNode }) {
 
   // Auto-reconnect after a dropped connection.
   useEffect(() => {
-    if (status !== "error" || !prefs.autoReconnect || !lastConn.current) return;
+    if (status !== "error" || !prefs.autoReconnect || !lastConn.current || !conn || conn.baseUrl !== lastConn.current.baseUrl) return;
     const id = setTimeout(() => {
       log("info", "Auto-reconnecting…");
       const previous = lastConn.current;
@@ -330,7 +330,7 @@ export function CameraProvider({ children }: { children: ReactNode }) {
       } else void connect(previous);
     }, nativeCameraAvailable() ? 12000 : 5000);
     return () => clearTimeout(id);
-  }, [status, prefs.autoReconnect, connect, log]);
+  }, [status, prefs.autoReconnect, connect, log, conn]);
 
   // Reconnect to the last camera on app start.
   useEffect(() => {

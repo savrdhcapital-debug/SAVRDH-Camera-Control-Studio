@@ -37,7 +37,7 @@ function CameraArt() {
 export default function ConnectionPage() {
   const cam = useCamera();
   const [mode, setMode] = useState<Mode>("auto");
-  const [ip, setIp] = useState("192.168.1.1");
+  const [ip, setIp] = useState("");
   const [port, setPort] = useState("8080");
   const [subnet, setSubnet] = useState("");
   const [found, setFound] = useState<Found[]>([]);
@@ -93,7 +93,7 @@ export default function ConnectionPage() {
     if (mode === "demo") return connectTo({ baseUrl: "mock", name: "Canon EOS R50 (Demo)", mode: "demo" });
     if (mode === "auto") return void scan();
     if (!IPV4.test(ip) || !/^\d{2,5}$/.test(port)) {
-      cam.notify("Enter a valid IP address and port, such as 192.168.1.1 : 8080", "error");
+      cam.notify("Enter the camera IP shown on its Camera Control API screen and a valid port. Do not use the router address.", "error");
       return;
     }
     connectTo({ baseUrl: `http://${ip}:${port}`, name: "Canon EOS R50", mode });
@@ -136,7 +136,7 @@ export default function ConnectionPage() {
           <div className="mt-3 grid grid-cols-[1fr_90px] gap-2">
             <label className="text-xs text-muted">
               Camera IP
-              <input value={ip} onChange={(e) => setIp(e.target.value)} inputMode="decimal" className="mt-1 w-full rounded-xl border border-line/10 bg-panel2 px-3 py-2 text-sm text-fg outline-none focus:border-accent" />
+              <input value={ip} onChange={(e) => setIp(e.target.value)} placeholder="IP shown on the camera" inputMode="decimal" className="mt-1 w-full rounded-xl border border-line/10 bg-panel2 px-3 py-2 text-sm text-fg outline-none focus:border-accent" />
             </label>
             <label className="text-xs text-muted">
               Port
@@ -151,6 +151,7 @@ export default function ConnectionPage() {
           </label>
         )}
 
+        {(mode === "direct" || mode === "network") && <p className="mt-3 text-xs text-muted">Use the address displayed by Camera Control API on the camera. Connecting to Wi-Fi alone does not start the camera service. A router address will not connect.</p>}
         <Btn variant="primary" className="mt-4 w-full" disabled={busy || scanning} onClick={onConnect}>
           {scanning ? "Scanning…" : busy ? "Connecting…" : mode === "auto" ? "Scan & Connect" : "Connect"}
         </Btn>
