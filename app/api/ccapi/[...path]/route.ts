@@ -39,6 +39,8 @@ async function proxy(req: NextRequest, ctx: { params: Promise<{ path: string[] }
     return NextResponse.json(r.json ?? {}, { status: r.status });
   }
 
+  if (process.env.VERCEL) return NextResponse.json({ message: "Use the installed SAVRDH Camera Studio app for a real Wi-Fi camera. The cloud server cannot reach your camera’s local IP address." }, { status: 409 });
+
   const base = parseCameraBase(baseParam ?? ENV_BASE);
   if (!base) {
     return NextResponse.json(

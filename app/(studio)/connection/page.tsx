@@ -1,19 +1,19 @@
 "use client";
 
 import AppearanceStudio from "@/components/AppearanceStudio";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCamera, type Conn } from "@/components/CameraProvider";
 import Icon from "@/components/Icon";
 import { Btn, Card, Radio } from "@/components/ui";
 
 type Mode = "direct" | "network" | "auto" | "demo" | "webcam";
-type Found = { ip: string; port: number; name: string; demo: boolean };
+import { nativeCameraAvailable, type DiscoveredCamera as Found } from "@/lib/native";
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: "webcam", label: "Laptop Webcam", hint: "Use the built-in camera for live view, photos and video (browser permission required)" },
   { id: "direct", label: "Wi‑Fi (Direct)", hint: "Connect this computer to the camera’s Wi-Fi hotspot" },
   { id: "network", label: "Wi‑Fi (Network)", hint: "Connect the camera and computer to the same router" },
-  { id: "auto", label: "Auto Detect", hint: "Scan the local network for a compatible CCAPI camera" },
+  { id: "auto", label: "Auto Detect", hint: "Installed app: find compatible Canon cameras on this device’s Wi-Fi" },
   { id: "demo", label: "Demo Camera", hint: "Try a simulated EOS R50 without camera hardware" },
 ];
 
@@ -36,7 +36,7 @@ function CameraArt() {
 
 export default function ConnectionPage() {
   const cam = useCamera();
-  const [mode, setMode] = useState<Mode>("webcam");
+  const [mode, setMode] = useState<Mode>("auto");
   const [ip, setIp] = useState("192.168.1.1");
   const [port, setPort] = useState("8080");
   const [subnet, setSubnet] = useState("");
@@ -63,8 +63,8 @@ export default function ConnectionPage() {
       if (!res.ok) throw new Error(data.message ?? "Scan failed");
       const list = data.cameras ?? [];
       setFound(list);
-      setScanMsg(list.length ? `${list.length} camera(s) found` : `No cameras found (${data.scanned ?? 0} addresses scanned). Is CCAPI enabled?`);
-      if (list.length === 1) connectFound(list[0]);
+      setScanMsg(list.length ? `${list.length} camera(s) found` : `No camera found after scanning ${data.scanned ?? 0} local addresses. Enable Camera Control API on the R50, keep it awake, use the same router, and allow Local Network access.`);
+      if (list.length === 1 && !list[0].authenticationRequired) connectFound(list[0]);
     } catch (e) {
       setScanMsg(e instanceof Error ? e.message : "Scan failed");
     } finally {
@@ -78,6 +78,15 @@ export default function ConnectionPage() {
         ? { baseUrl: "mock", name: f.name, mode: "demo" }
         : { baseUrl: `http://${f.ip}:${f.port}`, name: f.name, mode: "network" },
     );
+
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current || !nativeCameraAvailable()) return;
+    autoStarted.current = true;
+    void scan();
+    // Scan once on entry. A single detected camera connects automatically.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onConnect = () => {
     if (mode === "webcam") return connectTo({ baseUrl: "webcam", name: "Laptop Webcam", mode: "webcam" });
@@ -147,7 +156,7 @@ export default function ConnectionPage() {
         </Btn>
 
         {scanMsg && <p className="mt-2 text-xs text-muted">{scanMsg}</p>}
-        {found.length > 1 && (
+        {(found.length > 1 || found.some((camera) => camera.authenticationRequired)) && (
           <ul className="mt-2 space-y-2">
             {found.map((f) => (
               <li key={f.ip} className="flex items-center justify-between rounded-xl bg-panel2 px-3 py-2 text-sm">
@@ -190,8 +199,8 @@ export default function ConnectionPage() {
       <Card title="Real camera setup" className="lg:col-span-2">
         <ol className="list-decimal space-y-1 pl-5 text-sm text-muted">
           <li>Enable CCAPI on your camera. Verify developer activation and compatibility with your model and firmware.</li>
-          <li>Enable camera Wi-Fi and connect this computer to the same network or camera hotspot.</li>
-          <li>Enter the camera IP address or use Auto Detect, then select Connect.</li>
+          <li>For the installed app, connect the camera and this device to the same Wi-Fi router. Internet access is needed for Studio sign-in and access validation.</li>
+          <li>The installed app scans automatically. If discovery finds more than one camera, select yours. If no camera is found, enter the exact IP and port shown on the camera.</li>
           <li>Pairing saves the camera model and serial number. You may need to confirm the first connection on your camera.</li>
         </ol>
       </Card>

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { camera, type MediaItem } from "@/lib/camera";
 import { useCamera } from "@/components/CameraProvider";
+import CameraMedia from "@/components/CameraMedia";
+import { nativeCameraAvailable } from "@/lib/native";
 import Icon from "@/components/Icon";
 import { Btn, NotConnected } from "@/components/ui";
 
@@ -89,7 +91,15 @@ export default function LibraryPage() {
     if (!list.length) return cam.notify("Select one or more files first");
     cam.notify(`Downloading ${list.length} file(s)…`);
     for (const it of list) {
-      triggerDownload(camera.mainUrl(it), it.name);
+      try {
+        if (nativeCameraAvailable()) {
+          const response = await fetch(camera.mainUrl(it));
+          if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.message || "Download unavailable."); }
+          const url = URL.createObjectURL(await response.blob());
+          triggerDownload(url, it.name);
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } else triggerDownload(camera.mainUrl(it), it.name);
+      } catch (error) { cam.notify(error instanceof Error ? error.message : "Download failed", "error"); continue; }
       await sleep(500);
     }
     saveMeta({ ...meta, downloaded: [...new Set([...meta.downloaded, ...list.map((l) => l.id)])] });
@@ -224,7 +234,7 @@ export default function LibraryPage() {
                 className={`group relative aspect-[3/2] overflow-hidden rounded-xl border bg-panel2 ${picked ? "border-accent ring-2 ring-accent" : "border-line/10"}`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={camera.thumbUrl(it)} alt={it.name} loading="lazy" className="h-full w-full object-cover" />
+                <CameraMedia src={camera.thumbUrl(it)} alt={it.name} className="h-full w-full object-cover" />
                 <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 text-[10px] text-white">{it.name}</span>
                 {meta.favorites.includes(it.id) && <span className="absolute right-1 top-1 text-yellow-300">★</span>}
                 {meta.downloaded.includes(it.id) && <span className="absolute left-1 top-1 rounded bg-ok px-1 text-[10px] font-bold text-black">✓</span>}
@@ -266,10 +276,10 @@ export default function LibraryPage() {
           </div>
           <div className="grid min-h-0 flex-1 place-items-center" onClick={(e) => e.stopPropagation()}>
             {openItem.kind === "video" ? (
-              <video src={camera.mainUrl(openItem)} controls className="max-h-full max-w-full" />
+              <CameraMedia video src={camera.mainUrl(openItem)} className="max-h-full max-w-full" />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={camera.displayUrl(openItem)} alt={openItem.name} className="max-h-full max-w-full object-contain" />
+              <CameraMedia src={camera.displayUrl(openItem)} alt={openItem.name} className="max-h-full max-w-full object-contain" />
             )}
           </div>
         </div>

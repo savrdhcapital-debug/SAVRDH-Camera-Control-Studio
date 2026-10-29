@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ALL_SETTINGS, camera, setCameraBase, setCameraLogger, type Setting, type SettingName } from "@/lib/camera";
 import { useLocalStorage } from "@/lib/useLocalStorage";
+import { nativeCameraAvailable, type DiscoveredCamera } from "@/lib/native";
 import { usePrefs } from "./PrefsProvider";
 
 export type Status = "disconnected" | "connecting" | "connected" | "error";
@@ -313,8 +314,21 @@ export function CameraProvider({ children }: { children: ReactNode }) {
     if (status !== "error" || !prefs.autoReconnect || !lastConn.current) return;
     const id = setTimeout(() => {
       log("info", "Auto-reconnecting…");
-      if (lastConn.current) void connect(lastConn.current);
-    }, 5000);
+      const previous = lastConn.current;
+      if (!previous) return;
+      if (nativeCameraAvailable() && previous.serial && !["webcam", "demo"].includes(previous.mode)) {
+        void (async () => {
+          try {
+            const response = await fetch("/api/discover", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+            if (!response.ok) throw new Error("Discovery unavailable");
+            const data = await response.json() as { cameras?: DiscoveredCamera[] };
+            const match = data.cameras?.find((candidate) => candidate.serial === previous.serial);
+            if (match) { await connect({ ...previous, baseUrl: `http://${match.ip}:${match.port}` }); return; }
+          } catch { log("warn", "Camera rediscovery failed; trying the last saved address."); }
+          await connect(previous);
+        })();
+      } else void connect(previous);
+    }, nativeCameraAvailable() ? 12000 : 5000);
     return () => clearTimeout(id);
   }, [status, prefs.autoReconnect, connect, log]);
 

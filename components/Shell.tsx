@@ -11,6 +11,7 @@ const NAV: { href: string; label: string; icon: IconName }[] = [
   { href: "/photo", label: "Photo", icon: "camera" },
   { href: "/video", label: "Video", icon: "video" },
   { href: "/connection", label: "Connection", icon: "plug" },
+  { href: "/cctv", label: "CCTV Cameras", icon: "video" },
   { href: "/library", label: "Media Library", icon: "library" },
   { href: "/monitor", label: "Multi-Screen", icon: "multi" },
   { href: "/streaming", label: "Live Streaming", icon: "video" },

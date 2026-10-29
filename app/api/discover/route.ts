@@ -37,6 +37,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ cameras: [{ ip: "demo", port: 0, name: "Canon EOS R50 (Demo)", demo: true }] });
   }
 
+  if (process.env.VERCEL) {
+    return NextResponse.json({ message: "The hosted website cannot scan your Wi-Fi. Open the installed SAVRDH Camera Studio app on the same router as the camera, then use Auto Detect." }, { status: 409 });
+  }
+
   const prefixes = new Set<string>();
   if (body.subnet) {
     if (!isPrivateSubnetPrefix(body.subnet)) {
